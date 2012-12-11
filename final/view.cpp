@@ -9,9 +9,11 @@
 #include <GL/gl.h>
 #include <GL/glu.h>
 #include <GL/glext.h>
-#define dimX 100
-#define dimY 50
-#define dimZ 100
+#define dimX 75
+#define dimY 75
+#define dimZ 75
+#define SQUARE_SIZE 200
+#define SQUARE_DISTRIBUTION 40
 
 using namespace std;
 
@@ -21,7 +23,7 @@ View::View(QWidget *parent) : QGLWidget(parent), m_font("Verdana", 8, 4)
     setMouseTracking(true);
 
     // Hide the cursor since this is a fullscreen app
-  //  setCursor(Qt::BlankCursor);
+    //  setCursor(Qt::BlankCursor);
 
     // View needs keyboard focus
     setFocusPolicy(Qt::StrongFocus);
@@ -65,6 +67,7 @@ void View::initializeGL()
 
     glEnable(GL_LIGHTING);
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_ALPHA_TEST);
 
     glEnable(GL_TEXTURE_2D);
 
@@ -100,6 +103,10 @@ void View::initializeGL()
 
     QCursor::setPos(mapToGlobal(QPoint(width() / 2, height() / 2)));
 
+    m_textureID = this->loadTexture("../textures/particle_cloud.png");
+
+    glEnable(GL_ALPHA_TEST);
+
     paintGL();
 }
 
@@ -121,7 +128,7 @@ GLuint View::loadSkybox() {
 
     // Be glad we wrote this for you...ugh.
     glBegin(GL_QUADS);
-    float extent = 3000.f;
+    float extent = 2000.f;
     glTexCoord3f( 1.0f, -1.0f, -1.0f); glVertex3f( extent, -extent, -extent);
     glTexCoord3f(-1.0f, -1.0f, -1.0f); glVertex3f(-extent, -extent, -extent);
     glTexCoord3f(-1.0f,  1.0f, -1.0f); glVertex3f(-extent,  extent, -extent);
@@ -213,7 +220,7 @@ void View::applyPerspectiveCamera(float width, float height)
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(m_camera.fovy, ratio, 0.1f, 10000.f);
+    gluPerspective(m_camera.fovy, ratio, 0.1f, 7000.f);
     gluLookAt(eye.x, eye.y, eye.z, eye.x + dir.x, eye.y + dir.y, eye.z + dir.z,
               m_camera.up.x, m_camera.up.y, m_camera.up.z);
     glMatrixMode(GL_MODELVIEW);
@@ -232,18 +239,13 @@ void View::createFramebufferObjects(int width, int height)
     m_framebufferObjects["fbo_1"] = new QGLFramebufferObject(width, height, QGLFramebufferObject::NoAttachment,
                                                              GL_TEXTURE_2D, GL_RGB16F_ARB);
 
-//    m_framebufferObjects["fbo_2"] = new QGLFramebufferObject(width, height, QGLFramebufferObject::NoAttachment,
-//                                                             GL_TEXTURE_2D, GL_RGB16F_ARB);
+    m_framebufferObjects["fbo_2"] = new QGLFramebufferObject(width, height, QGLFramebufferObject::NoAttachment,
+                                                             GL_TEXTURE_2D, GL_RGB16F_ARB);
 }
 
 void View::paintGL()
 {
-
-    cout << "paint loop" << endl;
-
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    // TODO: Implement the demo rendering here
 
     int time = m_clock.elapsed();
     m_fps = 1000.f / (time - m_prevTime);
@@ -263,61 +265,60 @@ void View::paintGL()
     glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubeMap);
     glCallList(m_skybox);
 
+    glBindTexture(GL_TEXTURE_CUBE_MAP,0);
+    glDisable(GL_TEXTURE_CUBE_MAP);
+
     // Enable culling (back) faces for rendering the dragon
     glEnable(GL_CULL_FACE);
 
-    Vector3 startPoint(-50, -50, 20);
+    Vector3 startPoint(-2000, -1000, -2000);
 
+    // calculate the angle and axis about which the squares should be rotated to match
+    // the camera's rotation for billboarding
     Vector3 dir(-Vector3::fromAngles(m_camera.theta, m_camera.phi));
-    //Vector3 eye(m_camera.center - dir * m_camera.zoom);
-
     Vector3 faceNormal = Vector3(0,0,-1);
     Vector3 axis = dir.cross(faceNormal);
     axis.normalize();
     double angle = acos(dir.dot(faceNormal) / dir.length() / faceNormal.length());
 
-//    double thetaZ = atan2(axis.y * sin(angle)- axis.x * axis.z * (1. - cos(angle)) , 1. - (pow(axis.y, 2.) + pow(axis.z, 2.) ) * (1. - cos(angle)));
-//    double thetaY = asin(axis.x * axis.y * (1. - cos(angle)) + axis.z * sin(angle));
-//    double thetaX = atan2(axis.x * sin(angle)-axis.y * axis.z * (1. - cos(angle)) , 1. - (pow(axis.x, 2.) + pow(axis.z, 2.)) * (1. - cos(angle)));
-
-    glEnable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, m_textureID);
+    glTexEnvf(GL_TEXTURE_2D,GL_TEXTURE_ENV_MODE,GL_MODULATE);
     glDepthMask(GL_FALSE);
+    glEnable(GL_BLEND);
+    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    m_num_squares = 0;
 
-    for (int i=0; i<dimX; i++)
+    for (int i=0; i < dimX; i++)
     {
-        for (int j=0; j<dimY; j++)
+        for (int j=0; j < dimY; j++)
         {
-            for (int k=0; k<dimZ; k++)
+            for (int k=0; k < dimZ; k++)
             {
-                if (m_clouds[i][j][k] > 0.5)
-                {
-                    glEnable (GL_BLEND);
-                    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                float intensity = m_clouds[i][j][k];
 
+                if (intensity > 0.4)
+                {
+                    m_num_squares++;
                     glMatrixMode(GL_MODELVIEW);
                     glPushMatrix();
-                    glTranslatef(2*i, 2*j, 2*k);
+                    glTranslatef(startPoint.x+(SQUARE_DISTRIBUTION*i), startPoint.y+(SQUARE_DISTRIBUTION*j), startPoint.z+(SQUARE_DISTRIBUTION*k));
                     glRotatef((-angle/M_PI)*180, axis.x, axis.y, axis.z);
-                    glBegin(GL_QUADS);
-                    glColor4f(255.0f, 255.0f, 255.0f, 0.1f);
-                    glVertex3f(0,0,0);
-                    glVertex3f(0,-3,0);
-                    glVertex3f(3,-3,0);
-                    glVertex3f(3,0,0);
-                    glEnd();
+                    glColor4f(1.0f, 1.0f, 1.0f, 0.1f*intensity*intensity);
+                    renderTexturedQuad(SQUARE_SIZE, SQUARE_SIZE);
                     glPopMatrix();
                 }
             }
         }
     }
 
+    cout << "Squares painted: " << m_num_squares << endl;
+
     glDepthMask(GL_TRUE);
     glBindTexture(GL_TEXTURE_2D, 0);
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
-    glBindTexture(GL_TEXTURE_CUBE_MAP,0);
-    glDisable(GL_TEXTURE_CUBE_MAP);
 
     m_framebufferObjects["fbo_0"]->release();
 
@@ -325,9 +326,6 @@ void View::paintGL()
     m_framebufferObjects["fbo_0"]->blitFramebuffer(m_framebufferObjects["fbo_1"],
                                                    QRect(0, 0, width, height), m_framebufferObjects["fbo_0"],
                                                    QRect(0, 0, width, height), GL_COLOR_BUFFER_BIT, GL_NEAREST);
-
-    // TODO: Step 0 - draw the scene to the screen as a textured quad
-
     applyOrthogonalCamera(width, height);
     glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_1"]->texture());
     renderTexturedQuad(width, height);
@@ -341,10 +339,41 @@ void View::resizeGL(int w, int h)
     glViewport(0, 0, w, h);
 }
 
+GLuint View::loadTexture(const QString &path)
+{
+    QFile file(path);
+
+    QImage image, texture;
+    if(!file.exists()) return -1;
+    image.load(file.fileName());
+    texture = QGLWidget::convertToGLFormat(image);
+
+    //Put your code here
+    glEnable(GL_TEXTURE_2D);
+
+    GLuint id = 0;
+    glGenTextures(1, &id);
+
+    // Make the texture we just created is the new active texture
+    glBindTexture(GL_TEXTURE_2D, id);
+
+    // Copy the image data into the OpenGL texture
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width(), image.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, image.bits());
+
+    // Set filtering options
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // unbind the texture
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    return id; /* return something meaningful */
+}
+
 void View::renderTexturedQuad(int width, int height) {
     // Clamp value to edge of texture when texture index is out of bounds
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+//    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+//    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     // Draw the  quad
     glBegin(GL_QUADS);
@@ -402,13 +431,6 @@ void View::mouseReleaseEvent(QMouseEvent *event)
 {
 }
 
-void View::keyPressEvent(QKeyEvent *event)
-{
-    if (event->key() == Qt::Key_Escape) QApplication::quit();
-
-    // TODO: Handle keyboard presses here
-}
-
 void View::keyReleaseEvent(QKeyEvent *event)
 {
 }
@@ -422,6 +444,49 @@ void View::tick()
 
     // Flag this view for repainting (Qt will call paintGL() soon after)
     update();
+}
+
+void View::keyPressEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Escape) QApplication::quit();
+
+//    //we adjust how we move by what angle we're currently facing
+//    double cx = cos(-m_angleX * M_PI/180);
+//    double sx = sin(-m_angleX * M_PI/180);
+//    if(event->key() == Qt::Key_W)
+//    {
+//        m_zDiff -= 0.025f * cx;
+//        m_xDiff -= 0.025f * sx;
+//        this->updateCamera();
+//        this->update();
+//    }
+//    else if(event->key() == Qt::Key_S)
+//    {
+//        m_zDiff += 0.025f * cx;
+//        m_xDiff += 0.025f * sx;
+//        this->updateCamera();
+//        this->update();
+//    }
+//    else if(event->key() == Qt::Key_D)
+//    {
+//        m_zDiff += 0.025f * -sx;
+//        m_xDiff += 0.025f * cx;
+//        this->updateCamera();
+//        this->update();
+//    }
+//    else if(event->key() == Qt::Key_A)
+//    {
+//        m_zDiff -= 0.025f * -sx;
+//        m_xDiff -= 0.025f * cx;
+//        this->updateCamera();
+//        this->update();
+//    }
+//    else if(event->key() == Qt::Key_Escape)
+//    {
+//        m_firstPersonMode = false;
+//        m_originalMouseX = -1;
+//        m_originalMouseY = -1;
+//    }
 }
 
 void View::paintText()

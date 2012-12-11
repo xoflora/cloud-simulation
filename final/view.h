@@ -40,6 +40,7 @@ private:
 
     void paintText();
 
+    GLuint loadTexture(const QString &path);
     void mousePressEvent(QMouseEvent *event);
     void mouseMoveEvent(QMouseEvent *event);
     void mouseReleaseEvent(QMouseEvent *event);
@@ -51,6 +52,7 @@ private:
     int m_prevTime;
     double*** m_clouds;
     int m_num_squares;
+    GLuint m_textureID;
     float m_prevFps, m_fps;
     Vector2 m_prevMousePos;
 
