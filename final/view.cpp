@@ -110,7 +110,20 @@ void View::initializeGL()
     paintGL();
 }
 
-void View::initializeResources() {
+/**
+Create shader programs.
+**/
+void View::createShaderPrograms()
+{
+  const QGLContext *ctx = context();
+  m_shaderPrograms["reflect"] = ResourceLoader::newShaderProgram(ctx, "shaders/reflect.vert", "shaders/reflect.frag");
+  m_shaderPrograms["refract"] = ResourceLoader::newShaderProgram(ctx, "shaders/refract.vert", "shaders/refract.frag");
+  m_shaderPrograms["brightpass"] = ResourceLoader::newFragShaderProgram(ctx, "shaders/brightpass.frag");
+  m_shaderPrograms["blur"] = ResourceLoader::newFragShaderProgram(ctx, "shaders/blur.frag");
+}
+
+void View::initializeResources()
+{
 
     m_skybox = loadSkybox();
 

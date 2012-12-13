@@ -12,6 +12,7 @@
 #include "vector.h"
 #include "cloudgenerator.h"
 
+class QGLShaderProgram;
 class QGLFramebufferObject;
 
 class View : public QGLWidget
@@ -48,6 +49,7 @@ private:
 
     void keyPressEvent(QKeyEvent *event);
     void keyReleaseEvent(QKeyEvent *event);
+    void createShaderPrograms();
 
     int m_prevTime;
     double*** m_clouds;
@@ -55,12 +57,14 @@ private:
     GLuint m_textureID;
     float m_prevFps, m_fps;
     Vector2 m_prevMousePos;
+    OrbitCamera m_camera;
 
     GLuint m_skybox;
     GLuint m_cubeMap;
-    QHash<QString, QGLFramebufferObject *> m_framebufferObjects; // hash map of all framebuffer objects
-    OrbitCamera m_camera;
 
+    // Resources
+    QHash<QString, QGLShaderProgram *> m_shaderPrograms; // hash map of all shader programs
+    QHash<QString, QGLFramebufferObject *> m_framebufferObjects; // hash map of all framebuffer objects
     QFont m_font; // font for rendering text
 
     CloudGenerator* m_cloudgen;
