@@ -7,6 +7,8 @@
 #include <qgl.h>
 #include <QTime>
 #include <QTimer>
+#include <QGLShaderProgram>
+#include <QGLShader>
 
 #include "camera.h"
 #include "vector.h"
@@ -50,6 +52,9 @@ private:
     void keyPressEvent(QKeyEvent *event);
     void keyReleaseEvent(QKeyEvent *event);
     void createShaderPrograms();
+    QGLShaderProgram* newShaderProgram(const QGLContext *context, QString vertShader, QString fragShader);
+    QGLShaderProgram* newFragShaderProgram(const QGLContext *context, QString fragShader);
+    void renderLightScatter(int width, int height);
 
     int m_prevTime;
     double*** m_clouds;

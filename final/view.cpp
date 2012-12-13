@@ -9,6 +9,7 @@
 #include <GL/gl.h>
 #include <GL/glu.h>
 #include <GL/glext.h>
+#include <QGLShader>
 #define dimX 75
 #define dimY 75
 #define dimZ 75
@@ -16,6 +17,7 @@
 #define SQUARE_DISTRIBUTION 40
 
 using namespace std;
+class QGLShaderProgram;
 
 View::View(QWidget *parent) : QGLWidget(parent), m_font("Verdana", 8, 4)
 {
@@ -115,11 +117,8 @@ Create shader programs.
 **/
 void View::createShaderPrograms()
 {
-  const QGLContext *ctx = context();
-  m_shaderPrograms["reflect"] = ResourceLoader::newShaderProgram(ctx, "shaders/reflect.vert", "shaders/reflect.frag");
-  m_shaderPrograms["refract"] = ResourceLoader::newShaderProgram(ctx, "shaders/refract.vert", "shaders/refract.frag");
-  m_shaderPrograms["brightpass"] = ResourceLoader::newFragShaderProgram(ctx, "shaders/brightpass.frag");
-  m_shaderPrograms["blur"] = ResourceLoader::newFragShaderProgram(ctx, "shaders/blur.frag");
+      const QGLContext *ctx = context();
+      m_shaderPrograms["lightscatter"] = this->newFragShaderProgram(ctx, "../shaders/lightscatter.frag");
 }
 
 void View::initializeResources()
@@ -129,8 +128,9 @@ void View::initializeResources()
 
     loadCubeMap();
 
-    createFramebufferObjects(width(), height());
+    createShaderPrograms();
 
+    createFramebufferObjects(width(), height());
 }
 
 GLuint View::loadSkybox() {
@@ -256,6 +256,32 @@ void View::createFramebufferObjects(int width, int height)
                                                              GL_TEXTURE_2D, GL_RGB16F_ARB);
 }
 
+void View::renderLightScatter(int width, int height)
+{
+    float exposure = 0.5;
+    float decay = 0.5;
+    float density = 0.5;
+    float weight = 0.5;
+
+    //TODO : calculate light position on screen
+    GLfloat lightPositionOnScreen[2];
+    lightPositionOnScreen[0] = 50;
+    lightPositionOnScreen[1] = 100;
+
+    m_framebufferObjects["fbo_1"]->bind();
+    m_shaderPrograms["lightscatter"]->bind();
+    m_shaderPrograms["lightscatter"]->setUniformValue("exposure", exposure);
+    m_shaderPrograms["lightscatter"]->setUniformValue("decay", decay);
+    m_shaderPrograms["lightscatter"]->setUniformValue("density", density);
+    m_shaderPrograms["lightscatter"]->setUniformValue("weight", weight);
+    m_shaderPrograms["lightscatter"]->setUniformValueArray("lightPositionOnScreen", lightPositionOnScreen, 1, 2);
+    glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_2"]->texture());
+    renderTexturedQuad(width , height);
+    m_shaderPrograms["lightscatter"]->release();
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_framebufferObjects["fbo_1"]->release();
+}
+
 void View::paintGL()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -343,6 +369,8 @@ void View::paintGL()
     glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_1"]->texture());
     renderTexturedQuad(width, height);
     glBindTexture(GL_TEXTURE_2D, 0);
+
+    this->renderLightScatter(width, height);
 
     paintText();
 }
@@ -500,6 +528,29 @@ void View::keyPressEvent(QKeyEvent *event)
 //        m_originalMouseX = -1;
 //        m_originalMouseY = -1;
 //    }
+}
+
+/**
+    Creates a shader program from both vert and frag shaders
+  **/
+QGLShaderProgram* View::newShaderProgram(const QGLContext *context, QString vertShader, QString fragShader)
+{
+    QGLShaderProgram *program = new QGLShaderProgram(context);
+    program->addShaderFromSourceFile(QGLShader::Vertex, vertShader);
+    program->addShaderFromSourceFile(QGLShader::Fragment, fragShader);
+    program->link();
+    return program;
+}
+
+/**
+    Creates a new shader program from a frag shader only
+  **/
+QGLShaderProgram* View::newFragShaderProgram(const QGLContext *context, QString fragShader)
+{
+    QGLShaderProgram *program = new QGLShaderProgram(context);
+    program->addShaderFromSourceFile(QGLShader::Fragment, fragShader);
+    program->link();
+    return program;
 }
 
 void View::paintText()

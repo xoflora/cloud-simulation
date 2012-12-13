@@ -12,6 +12,9 @@ TEMPLATE = app
 # INCLUDEPATH += folder1 folder2
 # DEPENDPATH += folder1 folder2
 
+INCLUDEPATH += ../shaders
+DEPENDPATH += ../shaders
+
 SOURCES += main.cpp \
     mainwindow.cpp \
     view.cpp \
@@ -25,3 +28,6 @@ HEADERS += mainwindow.h \
     cloudgenerator.h
 
 FORMS += mainwindow.ui
+
+OTHER_FILES += \
+    ../shaders/lightscatter.frag
