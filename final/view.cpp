@@ -10,8 +10,11 @@
 #include <GL/glu.h>
 #include <GL/glext.h>
 #include <QGLShader>
+#include <iostream>
+#include <numeric>
+
 #define dimX 75
-#define dimY 75
+#define dimY 60
 #define dimZ 75
 #define SQUARE_SIZE 200
 #define SQUARE_DISTRIBUTION 40
@@ -258,24 +261,88 @@ void View::createFramebufferObjects(int width, int height)
 
 void View::renderLightScatter(int width, int height)
 {
-    float exposure = 0.5;
-    float decay = 0.5;
+    float exposure = 0.2;
+    float decay = 0.2;
     float density = 0.5;
-    float weight = 0.5;
+    float weight = 0.9;
 
-    //TODO : calculate light position on screen
-    GLfloat lightPositionOnScreen[2];
-    lightPositionOnScreen[0] = 50;
-    lightPositionOnScreen[1] = 100;
+    GLfloat lightPositionInWorld[4];
+    lightPositionInWorld[0] = -1998.;
+    lightPositionInWorld[1] = 800.;
+    lightPositionInWorld[2] = -1998.;
+    lightPositionInWorld[3] = 0.;
+
+//    double lightPositionInWorld[4];
+//    lightPositionInWorld[0] = -1998.;
+//    lightPositionInWorld[1] = 800.;
+//    lightPositionInWorld[2] = -1998.;
+//    lightPositionInWorld[3] = 0.;
+
+//    double modelView[16];
+//    double projection[16];
+//    double viewport[4];
+//    double depthRange[2];
+
+//    glGetDoublev(GL_MODELVIEW_MATRIX, modelView);
+//    glGetDoublev(GL_PROJECTION_MATRIX, projection);
+//    glGetDoublev(GL_VIEWPORT, viewport);
+//    glGetDoublev(GL_DEPTH_RANGE, depthRange);
+
+//    // Compose the matrices into a single row-major transformation
+//    double T[4][4];
+//    int r, c, i;
+//    for (r = 0; r < 4; ++r)
+//    {
+//     for (c = 0; c < 4; ++c)
+//     {
+//       T[r][c] = 0;
+//       for (i = 0; i < 4; ++i)
+//       {
+//         // OpenGL matrices are column major
+//          T[r][c] += projection[r + i * 4] * modelView[i + c * 4];
+//       }
+//     }
+//    }
+
+//    // Transform the vertex
+//    double result[4];
+//    for (r = 0; r < 4; ++r)
+//    {
+//     result[r] += (T[r][0]*lightPositionInWorld[0]) + (T[r][1]*lightPositionInWorld[1]) + (T[r][2]*lightPositionInWorld[2]) + (T[r][3]*lightPositionInWorld[3]);
+//    }
+
+//    // Homogeneous divide
+//    const double rhw = 1 / result[3];
+
+//    GLfloat lightPositionOnScreen[2];
+//    lightPositionOnScreen[0] = (1 + result[0] * rhw) * viewport[2] / 2 + viewport[0];
+//    lightPositionOnScreen[1] = (1 - result[1] * rhw) * viewport[3] / 2 + viewport[1];
+
+//    return Vector4(
+//    (1 + result.x * rhw) * viewport[2] / 2 + viewport[0],
+//    (1 - result.y * rhw) * viewport[3] / 2 + viewport[1],
+//    (result.z * rhw) * (depthRange[1] - depthRange[0]) + depthRange[0],
+//    rhw);
+
+    //do this in vert
+    //gl_ModelViewProjectionMatrix*lightPositionInWorld;
+
+//    //TODO : calculate light position on screen
+//    GLfloat lightPositionOnScreen[2];
+//    lightPositionOnScreen[0] = 50;
+//    lightPositionOnScreen[1] = 100;
 
     m_framebufferObjects["fbo_1"]->bind();
     m_shaderPrograms["lightscatter"]->bind();
+
+    glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_2"]->texture());
+
     m_shaderPrograms["lightscatter"]->setUniformValue("exposure", exposure);
     m_shaderPrograms["lightscatter"]->setUniformValue("decay", decay);
     m_shaderPrograms["lightscatter"]->setUniformValue("density", density);
     m_shaderPrograms["lightscatter"]->setUniformValue("weight", weight);
-    m_shaderPrograms["lightscatter"]->setUniformValueArray("lightPositionOnScreen", lightPositionOnScreen, 1, 2);
-    glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_2"]->texture());
+    m_shaderPrograms["lightscatter"]->setUniformValueArray("lightPositionInWorld", lightPositionInWorld, 1, 4);
+
     renderTexturedQuad(width , height);
     m_shaderPrograms["lightscatter"]->release();
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -319,6 +386,13 @@ void View::paintGL()
     Vector3 axis = dir.cross(faceNormal);
     axis.normalize();
     double angle = acos(dir.dot(faceNormal) / dir.length() / faceNormal.length());
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glTranslatef(-1500, 800, -1500);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    gluSphere(m_quadric, 400.f, 20.f, 20.f);
+    glPopMatrix();
 
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, m_textureID);
@@ -370,7 +444,24 @@ void View::paintGL()
     renderTexturedQuad(width, height);
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    m_framebufferObjects["fbo_2"]->bind();
+    glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_1"]->texture());
+    renderTexturedQuad(width, height);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_framebufferObjects["fbo_2"]->release();
+
     this->renderLightScatter(width, height);
+
+    glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_1"]->texture());
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+    // Enable alpha blending and render the texture to the screen
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+    renderTexturedQuad(width, height);
+    glDisable(GL_BLEND);
+    glBindTexture(GL_TEXTURE_2D, 0);
 
     paintText();
 }
