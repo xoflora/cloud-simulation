@@ -342,7 +342,7 @@ void View::renderLightScatter(int width, int height)
 void View::renderBlackBox() {
 
     //soo stuff is wrong (there is gray in the background at a certain spot (when looking at the circle))
-    glColor3f(0.5f,0.5f,0.5f);
+    glColor3f(0.97f,0.97f,0.97f);
 
     glBegin(GL_QUADS);
     float extent = 2000.f;

@@ -21,23 +21,36 @@ void main() {
         textCoo -= deltaTextCoord;
         vec4 sample = texture2D(firstPass, textCoo );
 	
+        if (sample.x > 0.98) {
+            sample.x = 1.0;
+        }
+        if (sample.y > 0.98) {
+            sample.y = 1.0;
+        }
+        if (sample.z > 0.98) {
+            sample.z = 1.0;
+        }
+        if (sample.w > 0.98) {
+            sample.w = 1.0;
+        }
+
 	sample.x = 1.-sample.x;
 	sample.y = 1.-sample.y;
 	sample.z = 1.-sample.z;
 	sample.w = 1.-sample.w;
 
-	if (sample.x < 0.8) {
-	    sample.x = 0.0;
-	}
-	if (sample.y < 0.8) {
-	    sample.y = 0.0;
-	}
-	if (sample.z < 0.8) {
-	    sample.z = 0.0;
-	}
-	if (sample.w < 0.8) {
-	    sample.w = 0.0;
-	}
+//	if (sample.x < 0.8) {
+//	    sample.x = 0.0;
+//	}
+//	if (sample.y < 0.8) {
+//	    sample.y = 0.0;
+//	}
+//	if (sample.z < 0.8) {
+//	    sample.z = 0.0;
+//	}
+//	if (sample.w < 0.8) {
+//	    sample.w = 0.0;
+//	}
 //	sample.x = 1.0-sample.x;
 //	sample.y = 1.0-sample.y;
 //	sample.z = 1.0-sample.z;
