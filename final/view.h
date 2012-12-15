@@ -56,6 +56,8 @@ private:
     QGLShaderProgram* newFragShaderProgram(const QGLContext *context, QString fragShader);
     void renderLightScatter(int width, int height);
 
+    void renderBlackBox();
+
     int m_prevTime;
     double*** m_clouds;
     int m_num_squares;

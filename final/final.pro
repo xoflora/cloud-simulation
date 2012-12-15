@@ -30,4 +30,5 @@ HEADERS += mainwindow.h \
 FORMS += mainwindow.ui
 
 OTHER_FILES += \
-    ../shaders/lightscatter.frag
+    ../shaders/lightscatter.frag \
+    ../shaders/lightscatter.vert
