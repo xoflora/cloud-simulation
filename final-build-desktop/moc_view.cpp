@@ -1,7 +1,7 @@
 /****************************************************************************
 ** Meta object code from reading C++ file 'view.h'
 **
-** Created: Sat Dec 15 13:55:27 2012
+** Created: Sun Dec 16 17:22:02 2012
 **      by: The Qt Meta Object Compiler version 62 (Qt 4.6.3)
 **
 ** WARNING! All changes made in this file will be lost!

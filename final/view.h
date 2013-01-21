@@ -57,11 +57,27 @@ private:
     void renderLightScatter(int width, int height);
 
     void renderBlackBox();
+    void renderClouds(bool blackModeEnabled);
+    void setSquareSize(float squareSize);
 
     int m_prevTime;
     double*** m_clouds;
     int m_num_squares;
-    GLuint m_textureID;
+    GLuint m_textureID1;
+    GLuint m_textureID2;
+    GLuint m_textureID3;
+    GLuint m_textureID4;
+    GLuint m_textureID5;
+    GLuint m_textureID6;
+    GLuint m_textureID7;
+    GLuint m_textureID8;
+    GLuint m_textureIDwhite;
+    GLuint m_textureIDModeler;
+    float m_squareSize;
+    float m_squareDistribution;
+    bool m_godRaysEnabled; // allows the user to toggle between using the god rays or not in the scene
+    bool m_godModeEnabled; // allows the user to view JUST the god rays given by the shader
+    bool m_modelerModeEnabled; // allows the user to view the particles without our beautiful textures
     float m_prevFps, m_fps;
     Vector2 m_prevMousePos;
     OrbitCamera m_camera;
@@ -76,6 +92,8 @@ private:
 
     CloudGenerator* m_cloudgen;
     GLUquadric* m_quadric;
+
+    int time;
 
 
 private slots:

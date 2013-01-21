@@ -1,6 +1,8 @@
 #include "camera.h"
 #include <qgl.h>
 
+using namespace std;
+
 void OrbitCamera::mouseMove(const Vector2 &delta)
 {
     // Rotate the eye vector around the origin
@@ -15,5 +17,6 @@ void OrbitCamera::mouseMove(const Vector2 &delta)
 void OrbitCamera::mouseWheel(float delta)
 {
     zoom *= powf(0.999f, delta);
+    zoom = min(500., zoom);
 }
 

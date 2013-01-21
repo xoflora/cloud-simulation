@@ -13,11 +13,14 @@
 #include <iostream>
 #include <numeric>
 
-#define dimX 75
-#define dimY 60
-#define dimZ 75
-#define SQUARE_SIZE 200
-#define SQUARE_DISTRIBUTION 40
+#define dimX 50
+#define dimY 25
+#define dimZ 50
+#define EXTENT 500.
+#define SUN_RADIUS 35
+#define SUNX -EXTENT+(2*SUN_RADIUS)
+#define SUNY (2*EXTENT)/3
+#define SUNZ -EXTENT+(2*SUN_RADIUS)
 
 using namespace std;
 class QGLShaderProgram;
@@ -26,11 +29,6 @@ View::View(QWidget *parent) : QGLWidget(parent), m_font("Verdana", 8, 4)
 {
     // View needs all move events, not just mouse drag events
     setMouseTracking(true);
-
-    // Hide the cursor since this is a fullscreen app
-    //  setCursor(Qt::BlankCursor);
-
-    // View needs keyboard focus
     setFocusPolicy(Qt::StrongFocus);
 
     m_camera.center = Vector3(0.f, 0.f, 0.f);
@@ -42,15 +40,32 @@ View::View(QWidget *parent) : QGLWidget(parent), m_font("Verdana", 8, 4)
     // The game loop is implemented using a timer
     connect(&timer, SIGNAL(timeout()), this, SLOT(tick()));
 
+    //initialize settings for our program
+    this->setSquareSize(100);
+    m_godRaysEnabled = true;
+    m_godModeEnabled = false;
+    m_modelerModeEnabled = false;
     m_cloudgen = new CloudGenerator();
     m_clouds = m_cloudgen->calcIntensity(dimX, dimY, dimZ);
-
 }
 
 View::~View()
 {
     gluDeleteQuadric(m_quadric);
     delete(m_cloudgen);
+    delete m_framebufferObjects["fbo_0"];
+    delete m_framebufferObjects["fbo_1"];
+    delete m_framebufferObjects["fbo_2"];
+    delete m_framebufferObjects["fbo_3"];
+}
+
+/**
+  A mutator for the square size (container size). The distribution of our cloud depends on this.
+  */
+void View::setSquareSize(float squareSize)
+{
+    m_squareSize = squareSize;
+    m_squareDistribution = m_squareSize / 5.0;
 }
 
 void View::initializeGL()
@@ -96,10 +111,7 @@ void View::initializeGL()
     glLightfv(GL_LIGHT0, GL_SPECULAR, specularLight);
     glLightfv(GL_LIGHT0, GL_POSITION, position);
 
-//    glDisable(GL_DITHER);
-
     glDisable(GL_LIGHTING);
-//    glShadeModel(GL_FLAT);
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
@@ -108,7 +120,17 @@ void View::initializeGL()
 
     QCursor::setPos(mapToGlobal(QPoint(width() / 2, height() / 2)));
 
-    m_textureID = this->loadTexture("../textures/particle_cloud.png");
+    //loads the textures used for the cloud particles
+    m_textureIDwhite = this->loadTexture("../textures/particle_cloud.png");
+    m_textureIDModeler = this->loadTexture("../textures/particle_cloud_gradient.png");
+    m_textureID1 = this->loadTexture("../textures/particle_cloud1.png");
+    m_textureID2 = this->loadTexture("../textures/particle_cloud2.png");
+    m_textureID3 = this->loadTexture("../textures/particle_cloud3.png");
+    m_textureID4 = this->loadTexture("../textures/particle_cloud4.png");
+    m_textureID5 = this->loadTexture("../textures/particle_cloud5.png");
+    m_textureID6 = this->loadTexture("../textures/particle_cloud6.png");
+    m_textureID7 = this->loadTexture("../textures/particle_cloud7.png");
+    m_textureID8 = this->loadTexture("../textures/particle_cloud8.png");
 
     glEnable(GL_ALPHA_TEST);
 
@@ -122,20 +144,19 @@ void View::createShaderPrograms()
 {
       const QGLContext *ctx = context();
       m_shaderPrograms["lightscatter"] = this->newFragShaderProgram(ctx, "../shaders/lightscatter.frag");
-//      m_shaderPrograms["lightscatter"] = this->newShaderProgram(ctx, "../shaders/lightscatter.vert", "../shaders/lightscatter.frag");
 }
 
 void View::initializeResources()
 {
-
     m_skybox = loadSkybox();
-
     loadCubeMap();
-
     createShaderPrograms();
-
     createFramebufferObjects(width(), height());
 }
+
+/**
+  loadSkybox: initializes and draws the sky box used for our cloud display (separate one for the occlusion pass, see below)
+  */
 
 GLuint View::loadSkybox() {
     //loads skybox
@@ -145,7 +166,7 @@ GLuint View::loadSkybox() {
 
     // Be glad we wrote this for you...ugh.
     glBegin(GL_QUADS);
-    float extent = 2000.f;
+    float extent = EXTENT;
     glTexCoord3f( 1.0f, -1.0f, -1.0f); glVertex3f( extent, -extent, -extent);
     glTexCoord3f(-1.0f, -1.0f, -1.0f); glVertex3f(-extent, -extent, -extent);
     glTexCoord3f(-1.0f,  1.0f, -1.0f); glVertex3f(-extent,  extent, -extent);
@@ -262,27 +283,40 @@ void View::createFramebufferObjects(int width, int height)
                                                              GL_TEXTURE_2D, GL_RGB16F_ARB);
 }
 
+/**
+  renderLightScatter: does pre-processing prior to passing our scene to the shader for god rays
+  */
+
 void View::renderLightScatter(int width, int height)
 {
-    float exposure = 1.0;
-    float decay = 0.95;
-    float density = 1.0;
-    float weight = 1.0;
+    float exposure = 0.8; //brightness of the rays compared to the rest of the scene
+    float decay = 0.95; //determines the fall-off of the rays from the light source
+    float density = 0.9; //frequency of samples between the pixel and the light source
+    float weight = 1.0; //scales the decay
+
+    Vector3 dir(-Vector3::fromAngles(m_camera.theta, m_camera.phi));
+
+    Vector3 lightVector(-SUNX, -SUNY,-SUNZ);
+    lightVector.normalize();
+
+    float dotLightLook = lightVector.dot(dir);
 
     double lightPositionInWorld[4];
-    lightPositionInWorld[0] = -1500.;
-    lightPositionInWorld[1] = 800.;
-    lightPositionInWorld[2] = -1500.;
+    lightPositionInWorld[0] = SUNX;
+    lightPositionInWorld[1] = SUNY;
+    lightPositionInWorld[2] = SUNZ;
     lightPositionInWorld[3] = 1.;
 
     double modelView[16];
     double projection[16];
-    double viewport[4];
+    double viewPort[4];
     double depthRange[2];
+
+    //copies the matrices of the camera to our arrays
 
     glGetDoublev(GL_MODELVIEW_MATRIX, modelView);
     glGetDoublev(GL_PROJECTION_MATRIX, projection);
-    glGetDoublev(GL_VIEWPORT, viewport);
+    glGetDoublev(GL_VIEWPORT, viewPort);
     glGetDoublev(GL_DEPTH_RANGE, depthRange);
 
     // Compose the matrices into a single row-major transformation
@@ -296,30 +330,26 @@ void View::renderLightScatter(int width, int height)
        T[r][c] = 0;
        for (i = 0; i < 4; ++i)
        {
-         // OpenGL matrices are column major
           T[r][c] += projection[r + i * 4] * modelView[i + c * 4];
        }
      }
     }
 
-    // Transform the vertex
     double result[4];
     for (r = 0; r < 4; ++r)
     {
         result[r] = (T[r][0]*lightPositionInWorld[0]) + (T[r][1]*lightPositionInWorld[1]) + (T[r][2]*lightPositionInWorld[2]) + (T[r][3]*lightPositionInWorld[3]);
     }
 
-    // Homogeneous divide
     const double rhw = 1 / result[3];
 
     GLfloat lightPositionOnScreen[2];
-    lightPositionOnScreen[0] = (1 + result[0] * rhw) * viewport[2] / 2 + viewport[0];
-    lightPositionOnScreen[1] = (1 - result[1] * rhw) * viewport[3] / 2 + viewport[1];
+    lightPositionOnScreen[0] = (1 + result[0] * rhw) * viewPort[2] / 2 + viewPort[0];
+    lightPositionOnScreen[1] = (1 - result[1] * rhw) * viewPort[3] / 2 + viewPort[1];
 
     lightPositionOnScreen[0] = lightPositionOnScreen[0]/((double)this->width());
     lightPositionOnScreen[1] = 1-(lightPositionOnScreen[1]/((double)this->height()));
 
-//    cout << "x: " << lightPositionOnScreen[0] << "; y: " << lightPositionOnScreen[1] << endl;
 
     m_framebufferObjects["fbo_1"]->bind();
     m_shaderPrograms["lightscatter"]->bind();
@@ -330,6 +360,7 @@ void View::renderLightScatter(int width, int height)
     m_shaderPrograms["lightscatter"]->setUniformValue("decay", decay);
     m_shaderPrograms["lightscatter"]->setUniformValue("density", density);
     m_shaderPrograms["lightscatter"]->setUniformValue("weight", weight);
+    m_shaderPrograms["lightscatter"]->setUniformValue("dotLightLook", dotLightLook);
     m_shaderPrograms["lightscatter"]->setUniformValueArray("lightPositionOnScreen", lightPositionOnScreen, 1, 2);
     applyOrthogonalCamera(width, height);
 
@@ -339,13 +370,21 @@ void View::renderLightScatter(int width, int height)
     m_framebufferObjects["fbo_1"]->release();
 }
 
-void View::renderBlackBox() {
-
-    //soo stuff is wrong (there is gray in the background at a certain spot (when looking at the circle))
-    glColor3f(0.5f,0.5f,0.5f);
+void View::renderBlackBox()
+{
+    /* change the color of the skybox based on whether we're rending just the god rays or multiplying
+     * them with the original image (this optimization was made so that image of just the god rays
+     * would be visible on even on low contrast monitors/projectors */
+    if(m_godModeEnabled)
+    {
+        glColor3f(0.97f,0.97f,0.97f);
+    } else
+    {
+        glColor3f(0.99f,0.99f,0.99f);
+    }
 
     glBegin(GL_QUADS);
-    float extent = 2000.f;
+    float extent = EXTENT;
     glVertex3f( extent, -extent, -extent);
     glVertex3f(-extent, -extent, -extent);
     glVertex3f(-extent,  extent, -extent);
@@ -377,77 +416,147 @@ void View::paintGL()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    int time = m_clock.elapsed();
-    m_fps = 1000.f / (time - m_prevTime);
-    m_prevTime = time;
     int width = this->width();
     int height = this->height();
 
-    m_framebufferObjects["fbo_0"]->bind();
-    applyPerspectiveCamera(width, height);
+    int time = m_clock.elapsed();
+    m_fps = 1000.f / (time - m_prevTime);
+    m_prevTime = time;
 
-    glEnable(GL_DEPTH_TEST);
-    glClear(GL_DEPTH_BUFFER_BIT);
+    if(this->m_godRaysEnabled || this->m_godModeEnabled)
+    {
+        m_framebufferObjects["fbo_0"]->bind();
+        applyPerspectiveCamera(width, height);
 
-    this->renderBlackBox();
+        glEnable(GL_DEPTH_TEST);
+        glClear(GL_DEPTH_BUFFER_BIT);
 
+        this->renderBlackBox();
 
-    glEnable(GL_CULL_FACE);
-
-//    Vector3 startPoint(-2000, -1000, -2000);
-
-//    // calculate the angle and axis about which the squares should be rotated to match
-//    // the camera's rotation for billboarding
-//    Vector3 dir(-Vector3::fromAngles(m_camera.theta, m_camera.phi));
-//    Vector3 faceNormal = Vector3(0,0,-1);
-//    Vector3 axis = dir.cross(faceNormal);
-//    axis.normalize();
-//    double angle = acos(dir.dot(faceNormal) / dir.length() / faceNormal.length());
-
-//    glEnable(GL_TEXTURE_2D);
-//    glBindTexture(GL_TEXTURE_2D, m_textureID);
-//    glTexEnvf(GL_TEXTURE_2D,GL_TEXTURE_ENV_MODE,GL_MODULATE);
-//    glDepthMask(GL_FALSE);
-//    glEnable(GL_BLEND);
-//    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-//    m_num_squares = 0;
-
-//    for (int i=0; i < dimX; i++)
-//    {
-//        for (int j=0; j < dimY; j++)
-//        {
-//            for (int k=0; k < dimZ; k++)
-//            {
-//                float intensity = m_clouds[i][j][k];
-
-//                if (intensity > 0.4)
-//                {
-//                    m_num_squares++;
-//                    glMatrixMode(GL_MODELVIEW);
-//                    glPushMatrix();
-//                    glTranslatef(startPoint.x+(SQUARE_DISTRIBUTION*i), startPoint.y+(SQUARE_DISTRIBUTION*j), startPoint.z+(SQUARE_DISTRIBUTION*k));
-//                    glRotatef((-angle/M_PI)*180, axis.x, axis.y, axis.z);
-//                    glColor4f(1.0f, 1.0f, 1.0f, 0.1f*intensity*intensity);
-//                    renderTexturedQuad(SQUARE_SIZE, SQUARE_SIZE);
-//                    glPopMatrix();
-//                }
-//            }
-//        }
-//    }
+        glEnable(GL_CULL_FACE);
 
 
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glTranslatef(-1500, 800, -1500);
-    glColor4f(0.0f, 0.0f, 0.0f, 0.0f);
-    gluSphere(m_quadric, 200.f, 20, 20);
-    glPopMatrix();
+        //draws the sun for god rays
+        glMatrixMode(GL_MODELVIEW);
+        glPushMatrix();
+        glTranslatef(SUNX, SUNY, SUNZ);
+        glColor4f(0.0f, 0.0f, 0.0f, 0.f);
+        gluSphere(m_quadric, SUN_RADIUS, 20, 20);
+        glPopMatrix();
 
-    glDisable(GL_CULL_FACE);
+        glDisable(GL_CULL_FACE);
 
-    glEnable(GL_CULL_FACE);
+        glEnable(GL_CULL_FACE);
 
-    Vector3 startPoint(-2000, -1000, -2000);
+        this->renderClouds(true);
+
+        glDisable(GL_CULL_FACE);
+
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+
+        m_framebufferObjects["fbo_0"]->release();
+
+        // Copy the rendered scene into framebuffer 1
+        m_framebufferObjects["fbo_0"]->blitFramebuffer(m_framebufferObjects["fbo_1"],
+                                                       QRect(0, 0, width, height), m_framebufferObjects["fbo_0"],
+                                                       QRect(0, 0, width, height), GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+
+    //START RENDERING REAL SKYBOX
+    if(!this->m_godModeEnabled)
+    {
+        // Render the scene to a framebuffer
+        m_framebufferObjects["fbo_0"]->bind();
+        applyPerspectiveCamera(width, height);
+
+        glEnable(GL_DEPTH_TEST);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        // Enable cube maps and draw the skybox
+        glEnable(GL_TEXTURE_CUBE_MAP);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubeMap);
+        glCallList(m_skybox); //renders the skybox
+
+        glBindTexture(GL_TEXTURE_CUBE_MAP,0);
+        glDisable(GL_TEXTURE_CUBE_MAP);
+
+        // Enable culling (back) faces for rendering the dragon
+        glEnable(GL_CULL_FACE);
+
+        this->renderClouds(false);
+
+        glDisable(GL_CULL_FACE);
+
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+
+        m_framebufferObjects["fbo_0"]->release();
+    }
+
+    //END REAL SKYBOX
+
+    // Copy the rendered scene into framebuffer 1
+    m_framebufferObjects["fbo_0"]->blitFramebuffer(m_framebufferObjects["fbo_3"],
+                                                   QRect(0, 0, width, height), m_framebufferObjects["fbo_0"],
+                                                   QRect(0, 0, width, height), GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    // render the scene if not in god mode
+    if(!m_godModeEnabled)
+    {
+        applyOrthogonalCamera(width, height);
+        glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_3"]->texture());
+        renderTexturedQuad(width, height);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    // check if the user specified that god rays should be calculated on the gpu
+    if(m_godRaysEnabled || m_godModeEnabled)
+    {
+        // copy what's in FBO 1 to FBO 2 for renderLightScatter shader stuff
+        applyOrthogonalCamera(width, height);
+        m_framebufferObjects["fbo_2"]->bind();
+        glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_1"]->texture());
+        renderTexturedQuad(width, height);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        m_framebufferObjects["fbo_2"]->release();
+
+        // Enable alpha blending and render the texture from the GPU to the screen
+        applyPerspectiveCamera(width, height);
+        this->renderLightScatter(width, height);
+        applyOrthogonalCamera(width, height);
+        glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_1"]->texture());
+
+        //blend if we're using god rays
+        if(!m_godModeEnabled)
+        {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);
+        }
+
+        renderTexturedQuad(width, height);
+
+        if(!m_godModeEnabled)
+        {
+            glDisable(GL_BLEND);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    paintText();
+}
+
+/**
+  Called to draw the cloud particles on the screen (used for both god mode and normal node)
+  */
+
+void View::renderClouds(bool renderGreyMode) {
+
+    //start point is determined by our sky box size
+    Vector3 startPoint(-EXTENT, -EXTENT+(2*SUN_RADIUS), -EXTENT);
 
     // calculate the angle and axis about which the squares should be rotated to match
     // the camera's rotation for billboarding
@@ -457,155 +566,121 @@ void View::paintGL()
     axis.normalize();
     double angle = acos(dir.dot(faceNormal) / dir.length() / faceNormal.length());
 
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, m_textureID);
+    //if we're rending the grey occlusion mode, use white cloud particles
+    if (renderGreyMode)
+    {
+        glBindTexture(GL_TEXTURE_2D, m_textureIDwhite);
+    // use white gradient particle if we're in modeler mode
+    } else if(m_modelerModeEnabled)
+    {
+        glBindTexture(GL_TEXTURE_2D, m_textureIDModeler);
+    }
+
     glTexEnvf(GL_TEXTURE_2D,GL_TEXTURE_ENV_MODE,GL_MODULATE);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_BLEND_SRC);
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
     glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     m_num_squares = 0;
 
+    //light vector indicates direction in which the suns rays are going
+    Vector3 lightVector(-SUNX, -SUNY, -SUNZ);
+    lightVector.normalize();
+
+    double particleSunAngle;
+
+    //populate the cloud lattice
     for (int i=0; i < dimX; i++)
     {
         for (int j=0; j < dimY; j++)
         {
             for (int k=0; k < dimZ; k++)
             {
-                float intensity = m_clouds[i][j][k];
-
-                if (intensity > 0.4)
+                //intensity is the value given in the corresponding perlin 3d array, also incorporating vertical fall-off
+                float intensity = m_clouds[i][j][k]*(1.0 - (j/((float) dimY)));
+                //threshold for rendering a particle
+                if (intensity > 0.1)
                 {
+                    //use various particle colors depending on intensity and lighting scheme
+                    if (!(renderGreyMode || m_modelerModeEnabled))
+                    {
+                        //vector from the sun to the current particle
+                        Vector3 toParticle(startPoint.x+(m_squareDistribution*i)-SUNX, startPoint.y+(m_squareDistribution*j)-SUNY, startPoint.z+(m_squareDistribution*k)-SUNZ);
+                        toParticle.normalize();
+
+                        //cos of the angle from sun to particle, mapping to range [0,1]
+                        particleSunAngle = ((lightVector.dot(toParticle))/2.)+0.5;
+
+                        //factor is greater when particles are in more direct view of the sun
+                        double factor = ((1.8-(particleSunAngle))*m_clouds[i][j][k]);
+
+                        if (factor >= 0.0 && factor <= 0.125)
+                        {
+                            glBindTexture(GL_TEXTURE_2D, m_textureID8);
+                        }
+                        else if (factor > 0.125 && factor <= 0.18)
+                        {
+                            glBindTexture(GL_TEXTURE_2D, m_textureID7);
+                        }
+                        else if (factor > 0.18 && factor <= 0.25)
+                        {
+                            glBindTexture(GL_TEXTURE_2D, m_textureID6);
+                        }
+                        else if (factor > 0.25 && factor <= 0.31)
+                        {
+                            glBindTexture(GL_TEXTURE_2D, m_textureID5);
+                        }
+                        else if (factor > 0.31 && factor <= 0.4)
+                        {
+                            glBindTexture(GL_TEXTURE_2D, m_textureID4);
+                        }
+                        else if (factor > 0.4 && factor <= 0.5)
+                        {
+                            glBindTexture(GL_TEXTURE_2D, m_textureID3);
+                        }
+                        else if (factor > 0.5 && factor <= 0.6)
+                        {
+                            glBindTexture(GL_TEXTURE_2D, m_textureID2);
+                        }
+                        else if (factor > 0.6 && factor <= 1.0)
+                        {
+                            glBindTexture(GL_TEXTURE_2D, m_textureID1);
+                        }
+                    }
+
                     m_num_squares++;
                     glMatrixMode(GL_MODELVIEW);
                     glPushMatrix();
-                    glTranslatef(startPoint.x+(SQUARE_DISTRIBUTION*i), startPoint.y+(SQUARE_DISTRIBUTION*j), startPoint.z+(SQUARE_DISTRIBUTION*k));
+                    glTranslatef(startPoint.x+(m_squareDistribution*i), startPoint.y+(m_squareDistribution*j), startPoint.z+(m_squareDistribution*k));
                     glRotatef((-angle/M_PI)*180, axis.x, axis.y, axis.z);
-                    glColor4f(1.0f, 1.0f, 1.0f, 0.1f*intensity*intensity);
-                    renderTexturedQuad(SQUARE_SIZE, SQUARE_SIZE);
+                    glColor4f(1.0f, 1.0f, 1.0f, 0.1f);
+                    renderTexturedQuad(m_squareSize, m_squareSize);
+
+                    if (!renderGreyMode && !m_modelerModeEnabled)
+                    {
+                        glBindTexture(GL_TEXTURE_2D, 0);
+                    }
                     glPopMatrix();
                 }
             }
         }
     }
 
-    glDisable(GL_CULL_FACE);
-
-    glDepthMask(GL_TRUE);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glDisable(GL_BLEND);
-    glDisable(GL_DEPTH_TEST);
-
-    m_framebufferObjects["fbo_0"]->release();
-
-//    // Render the scene to a framebuffer
-//    m_framebufferObjects["fbo_0"]->bind();
-//    applyPerspectiveCamera(width, height);
-
-//    glEnable(GL_DEPTH_TEST);
-//    glClear(GL_DEPTH_BUFFER_BIT);
-
-//    // Enable cube maps and draw the skybox
-//    glEnable(GL_TEXTURE_CUBE_MAP);
-//    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubeMap);
-//    glCallList(m_skybox); //renders the skybox
-
-//    glBindTexture(GL_TEXTURE_CUBE_MAP,0);
-//    glDisable(GL_TEXTURE_CUBE_MAP);
-
-//    // Enable culling (back) faces for rendering the dragon
-//    glEnable(GL_CULL_FACE);
-
-//    Vector3 startPoint(-2000, -1000, -2000);
-
-//    // calculate the angle and axis about which the squares should be rotated to match
-//    // the camera's rotation for billboarding
-//    Vector3 dir(-Vector3::fromAngles(m_camera.theta, m_camera.phi));
-//    Vector3 faceNormal = Vector3(0,0,-1);
-//    Vector3 axis = dir.cross(faceNormal);
-//    axis.normalize();
-//    double angle = acos(dir.dot(faceNormal) / dir.length() / faceNormal.length());
-
-//    glEnable(GL_TEXTURE_2D);
-//    glBindTexture(GL_TEXTURE_2D, m_textureID);
-//    glTexEnvf(GL_TEXTURE_2D,GL_TEXTURE_ENV_MODE,GL_MODULATE);
-//    glDepthMask(GL_FALSE);
-//    glEnable(GL_BLEND);
-//    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-//    m_num_squares = 0;
-
-//    for (int i=0; i < dimX; i++)
-//    {
-//        for (int j=0; j < dimY; j++)
-//        {
-//            for (int k=0; k < dimZ; k++)
-//            {
-//                float intensity = m_clouds[i][j][k];
-
-//                if (intensity > 0.4)
-//                {
-//                    m_num_squares++;
-//                    glMatrixMode(GL_MODELVIEW);
-//                    glPushMatrix();
-//                    glTranslatef(startPoint.x+(SQUARE_DISTRIBUTION*i), startPoint.y+(SQUARE_DISTRIBUTION*j), startPoint.z+(SQUARE_DISTRIBUTION*k));
-//                    glRotatef((-angle/M_PI)*180, axis.x, axis.y, axis.z);
-//                    glColor4f(1.0f, 1.0f, 1.0f, 0.1f*intensity*intensity);
-//                    renderTexturedQuad(SQUARE_SIZE, SQUARE_SIZE);
-//                    glPopMatrix();
-//                }
-//            }
-//        }
-//    }
-
-//    cout << "Squares painted: " << m_num_squares << endl;
-
-//    glDepthMask(GL_TRUE);
-//    glBindTexture(GL_TEXTURE_2D, 0);
-//    glDisable(GL_BLEND);
-//    glDisable(GL_CULL_FACE);
-//    glDisable(GL_DEPTH_TEST);
-
-//    m_framebufferObjects["fbo_0"]->release();
-
-    // Copy the rendered scene into framebuffer 1
-    m_framebufferObjects["fbo_0"]->blitFramebuffer(m_framebufferObjects["fbo_1"],
-                                                   QRect(0, 0, width, height), m_framebufferObjects["fbo_0"],
-                                                   QRect(0, 0, width, height), GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    applyOrthogonalCamera(width, height);
-    glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_1"]->texture());
-    renderTexturedQuad(width, height);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // copy what's in FBO 1 to FBO 2 for renderLightScatter shader stuff
-
-    m_framebufferObjects["fbo_2"]->bind();
-    glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_1"]->texture());
-    renderTexturedQuad(width, height);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    m_framebufferObjects["fbo_2"]->release();
-
-    applyPerspectiveCamera(width, height);
-
-    this->renderLightScatter(width, height);
-
-    applyOrthogonalCamera(width, height);
-
-    glBindTexture(GL_TEXTURE_2D, m_framebufferObjects["fbo_1"]->texture());
-//    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-//    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-    // Enable alpha blending and render the texture to the screen
-//    glEnable(GL_BLEND);
-//    glBlendFunc(GL_ONE, GL_ONE);
-    renderTexturedQuad(width, height);
-//    glDisable(GL_BLEND);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    paintText();
+    if (renderGreyMode || m_modelerModeEnabled)
+    {
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
 }
+
 
 void View::resizeGL(int w, int h)
 {
     glViewport(0, 0, w, h);
+    delete m_framebufferObjects["fbo_0"];
+    delete m_framebufferObjects["fbo_1"];
+    delete m_framebufferObjects["fbo_2"];
+    delete m_framebufferObjects["fbo_3"];
+    createFramebufferObjects(w, h);
 }
 
 GLuint View::loadTexture(const QString &path)
@@ -617,7 +692,6 @@ GLuint View::loadTexture(const QString &path)
     image.load(file.fileName());
     texture = QGLWidget::convertToGLFormat(image);
 
-    //Put your code here
     glEnable(GL_TEXTURE_2D);
 
     GLuint id = 0;
@@ -627,7 +701,7 @@ GLuint View::loadTexture(const QString &path)
     glBindTexture(GL_TEXTURE_2D, id);
 
     // Copy the image data into the OpenGL texture
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width(), image.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, image.bits());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width(), image.height(), 0, GL_BGRA, GL_UNSIGNED_BYTE, image.bits());
 
     // Set filtering options
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -639,11 +713,8 @@ GLuint View::loadTexture(const QString &path)
     return id; /* return something meaningful */
 }
 
-void View::renderTexturedQuad(int width, int height) {
-    // Clamp value to edge of texture when texture index is out of bounds
-//    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-//    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
+void View::renderTexturedQuad(int width, int height)
+{
     // Draw the  quad
     glBegin(GL_QUADS);
     glTexCoord2f(0.0f, 0.0f);
@@ -683,17 +754,14 @@ void View::mouseMoveEvent(QMouseEvent *event)
     int deltaX = event->x() - width() / 2;
     int deltaY = event->y() - height() / 2;
     if (!deltaX && !deltaY) return;
-//    QCursor::setPos(mapToGlobal(QPoint(width() / 2, height() / 2)));
-
-    // TODO: Handle mouse movements here
 
     Vector2 pos(event->x(), event->y());
     if (event->buttons() & Qt::LeftButton || event->buttons() & Qt::RightButton)
     {
         m_camera.mouseMove(pos - m_prevMousePos);
     }
-    m_prevMousePos = pos;
 
+    m_prevMousePos = pos;
 }
 
 void View::mouseReleaseEvent(QMouseEvent *event)
@@ -719,43 +787,31 @@ void View::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) QApplication::quit();
 
-//    //we adjust how we move by what angle we're currently facing
-//    double cx = cos(-m_angleX * M_PI/180);
-//    double sx = sin(-m_angleX * M_PI/180);
-//    if(event->key() == Qt::Key_W)
-//    {
-//        m_zDiff -= 0.025f * cx;
-//        m_xDiff -= 0.025f * sx;
-//        this->updateCamera();
-//        this->update();
-//    }
-//    else if(event->key() == Qt::Key_S)
-//    {
-//        m_zDiff += 0.025f * cx;
-//        m_xDiff += 0.025f * sx;
-//        this->updateCamera();
-//        this->update();
-//    }
-//    else if(event->key() == Qt::Key_D)
-//    {
-//        m_zDiff += 0.025f * -sx;
-//        m_xDiff += 0.025f * cx;
-//        this->updateCamera();
-//        this->update();
-//    }
-//    else if(event->key() == Qt::Key_A)
-//    {
-//        m_zDiff -= 0.025f * -sx;
-//        m_xDiff -= 0.025f * cx;
-//        this->updateCamera();
-//        this->update();
-//    }
-//    else if(event->key() == Qt::Key_Escape)
-//    {
-//        m_firstPersonMode = false;
-//        m_originalMouseX = -1;
-//        m_originalMouseY = -1;
-//    }
+    if (event->key() == Qt::Key_G)
+    {
+       m_godRaysEnabled = !m_godRaysEnabled && !m_modelerModeEnabled;
+    }
+
+    if (event->key() == Qt::Key_B)
+    {
+       m_godModeEnabled = !m_godModeEnabled;
+    }
+
+    if (event->key() == Qt::Key_Q)
+    {
+        this->setSquareSize(min(m_squareSize + 5, 100));
+    }
+
+    if (event->key() == Qt::Key_W)
+    {
+       this->setSquareSize(max(m_squareSize - 5, 0));
+    }
+
+    if (event->key() == Qt::Key_M)
+    {
+       m_modelerModeEnabled = !m_modelerModeEnabled;
+       m_godRaysEnabled = false;
+    }
 }
 
 /**
@@ -793,7 +849,9 @@ void View::paintText()
     }
 
     // QGLWidget's renderText takes xy coordinates, a string, and a font
-    renderText(10, 20, "FPS: " + QString::number((int) (m_prevFps)), m_font);
-    renderText(10, 35, "S: Save screenshot", m_font);
+    renderText(10, 20, "G: Toggle God Rays", m_font);
+    renderText(10, 35, "B: Toggle God Ray Pass", m_font);
+    renderText(10, 50, "M: Toggle Modeler Mode", m_font);
+    renderText(10, 65, "Q/W: Increase/Decrease Container Size", m_font);
 }
 
